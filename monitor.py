@@ -14,8 +14,10 @@ node_name  user  job_name job_ID Time %CPU CPU_Mem T_CPU %GPU GPU_Mem T_GPU v_IB
 """
 
 import os
+import io
 import subprocess
 import argparse
+import threading
 
 from os.path import isfile
 
@@ -108,7 +110,18 @@ Can use only digit and full name.""",
 
     return args
 
-def check_node_state():
+def run_cli(cmd, results):
+    try:
+        result = subprocess.check_output(cmd)
+        results[cmd[0]] = result.decode('utf-8').strip()
+    except subprocess.CalledProcessError as err:
+        print("Error: error occurred while running %s." %(cmd))
+        print("    Error code: ", err.returncode)
+        print("    Fail message:")
+        print(err.output.decode('utf-8'))
+        exit(1)
+
+def get_node_state():
     """
     Check alive nodes from pbs.
 
@@ -116,16 +129,102 @@ def check_node_state():
 
     alive_nodes : list of alive nodes
     """
+    # 1. Command lines to get the node stat data
+    qstat = ['qstat', '-n']
+    pbsnodes = ['pbsnodes', '-a']
+    cmds = [qstat, pbsnodes]
+    
+    # 2. Run cmds in multiple threads
+    threads = []
+    results = {}
+    for cmd in cmds:
+        thread = threading.Thread(target=run_cli, args=(cmd, results))
+        thread.start()
+        threads.append(thread)
 
-    #dead_nodes = subprocess()
+    for thread in threads:
+        thread.join()
+    
+    # 3. Deal with command results
+    # 3.1 qstat
+    job_stats = qstat_data_handler(results['qstat'])
+    print(job_stats)
+
+    # 3.2 pbsnodes
+    pbsnodes_data_handler(results['pbsnodes'])
+
+    
+def qstat_data_handler(qstat_msg):
+    """
+    Deal with message from command 'qstat -n'
+    
+    input:
+    qstat_msg : result string from the command
+
+    output:
+    job_state : A list of directiionaries to record job stat 
+    [{'Job_ID': ***, 'Name': ***, 'User', 'Time': **:**:**, 'Nodes': []}, ]
+    """
+    # 1. Split total message into lines
+    lines = io.StringIO(qstat_msg).readlines()[4:]
+    
+    # 2. Deal with message per line
+    # 2.1 Initialization of variables required
+    nodes = []
+    jobs_state = []
+
+    # 2.2 Analyze message
+    for line in lines:
+        parts = line.split()
+        # 2.2.1 Create new job info mation as read a new job.
+        
+        if len(parts) == 11:
+            # 2.2.1.1 Add using nodes to previous job state
+            if len(jobs_state) > 0:
+                jobs_state[-1]['nodes'] = nodes
+
+            # 2.2.1.2 Create a new job state
+            job_ID = parts[0].split('.')[0]
+            user = parts[1]
+            name = parts[3]
+            stat = parts[9]
+            time = parts[10]
+            nodes = []
+            jobs_state.append({
+                               'ID': job_ID,
+                               'User': user,
+                               'Name': name,
+                               'Time': time,
+                               'Stat': stat,
+                             })
+        
+        # 2.2.2 Grep Using nodes in the job
+        elif len(parts) == 1:
+            threads = line.split('+')
+            for thread in threads:
+                if thread.endswith('/0'):
+                    nodes.append(thread[-9:-2])
+
+        # 2.2.3 
+        else:
+            print("Warning: Unexpected messages occurred in 'qstat -n' message.")
+            print("Please check the system")
+            exit(1)
+
+    jobs_state[-1]['nodes'] = nodes
+
+    return jobs_state
+
+def pbsnodes_data_handler(pbs_msg):
+    return 0
+
 
 if __name__ == "__main__":
     # 1. Handle arguments
     args = arg_handler()
-    print(args)
 
     # 2. Get node state : alive_or_dead user job_name job_ID Time
-    node_state = check_node_state()
+    node_state = get_node_state()
 
     # 3. Get node datas
     # 3.2 CPU : Usage and Temp.
