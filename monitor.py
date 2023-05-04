@@ -15,6 +15,7 @@ node_name  user  job_name job_ID Time %CPU CPU_Mem T_CPU %GPU GPU_Mem T_GPU v_IB
 
 import os
 import io
+import re
 import subprocess
 import argparse
 import threading
@@ -151,7 +152,8 @@ def get_node_state():
     print(job_stats)
 
     # 3.2 pbsnodes
-    pbsnodes_data_handler(results['pbsnodes'])
+    nodes_state = pbsnodes_data_handler(results['pbsnodes'])
+    print(nodes_state)
 
     
 def qstat_data_handler(qstat_msg):
@@ -166,7 +168,7 @@ def qstat_data_handler(qstat_msg):
     [{'Job_ID': ***, 'Name': ***, 'User', 'Time': **:**:**, 'Nodes': []}, ]
     """
     # 1. Split total message into lines
-    lines = io.StringIO(qstat_msg).readlines()[4:]
+    lines = qstat_msg.splitlines()[4:]
     
     # 2. Deal with message per line
     # 2.1 Initialization of variables required
@@ -203,20 +205,42 @@ def qstat_data_handler(qstat_msg):
             threads = line.split('+')
             for thread in threads:
                 if thread.endswith('/0'):
-                    nodes.append(thread[-9:-2])
+                    nodes.append(thread[-10:-2])
 
-        # 2.2.3 
+        # 2.2.3 Crash while receive unexpected message from command
         else:
             print("Warning: Unexpected messages occurred in 'qstat -n' message.")
             print("Please check the system")
             exit(1)
-
-    jobs_state[-1]['nodes'] = nodes
+    
+    if len(jobs_state) > 0:
+        jobs_state[-1]['nodes'] = nodes
 
     return jobs_state
 
 def pbsnodes_data_handler(pbs_msg):
-    return 0
+    nodes = {}
+
+    for line in pbs_msg.splitlines():
+        if line.startswith('eureka'):
+            node_name = line
+            nodes[node_name] = {'state': 'unknown', 'jobs': []}
+        elif ' state =' in line:
+            nodes[node_name]['state'] = line.split()[2]
+        elif ' jobs =' in line:
+            jobs = line.split()[2:]
+            jobs_info = {}
+            for job in jobs:
+                job_ID = job.split('.')[0].split('/')[1]
+                if job_ID in jobs_info:
+                    jobs_info[job_ID] += 1
+                else:
+                    jobs_info[job_ID] = 1
+            nodes[node_name]['jobs'].append(jobs_info)
+        else:
+            continue
+
+    return nodes
 
 
 if __name__ == "__main__":
