@@ -16,12 +16,15 @@ node_name  user  job_name job_ID Time %CPU CPU_Mem T_CPU %GPU GPU_Mem T_GPU v_IB
 import os
 import io
 import re
-import subprocess
+import sys
 import argparse
 import threading
 
 from os.path import isfile
 
+sys.dont_write_bytecode = True
+
+import src.run_cli as rc
 
 def validate_nodes(nodes, parser):
     """
@@ -111,50 +114,6 @@ Can use only digit and full name.""",
 
     return args
 
-def run_cli(cmd, results):
-    """
-    Run the command line and catch the return message.
-
-    Input:
-        cmd : A list that record command going to run.
-        results : A dictionary with key of command name and the result message.
-    """
-
-    # 1. Execute command with subprocess.
-    try:
-        result = subprocess.check_output(cmd)
-        results[os.path.basename(cmd[0])] = result.decode('utf-8').strip()
-    # 2. Print out the error message and exit the program.
-    except subprocess.CalledProcessError as err:
-        print("Error: error occurred while running %s." %(cmd))
-        print("    Error code: ", err.returncode)
-        print("    Fail message:")
-        print(err.output.decode('utf-8'))
-        exit(1)
-
-def run_pdsh_cli(cmd, nodes, results):
-    """
-    Run the command line with pdsh and catch the return message.
-
-    Input:
-        cmd : A list that record command going to run.
-        nodes: A list that record nodes we are going to run command on.
-        results : A dictionary with key of command name and the result message.
-    """
-    # 1. Join the pdsh command and commands.
-    pdsh_cmd = ['pdsh', '-w', '-u', '10', ','.join(nodes)] + cmd
-    # 2. Execute command with subprocess.
-    try:
-        result = subprocess.check_output(pdsh_cmd)
-        results[os.path.basename(cmd[0])] = result.decode('utf-8').strip()
-    # 3. Print out the error message and exit the program.
-    except subprocess.CalledProcessError as err:
-        print("Error: error occurred while running %s." %(pdsh_cmd))
-        print("    Error code: ", err.returncode)
-        print("    Fail message:")
-        print(err.output.decode('utf-8'))
-        exit(1)
-
 def get_node_state():
     """
     Check alive nodes from pbs.
@@ -173,7 +132,7 @@ def get_node_state():
     threads = []
     results = {}
     for cmd in cmds:
-        thread = threading.Thread(target=run_cli, args=(cmd, results))
+        thread = threading.Thread(target=rc.run_cli, args=(cmd, results))
         thread.start()
         threads.append(thread)
 
@@ -183,29 +142,56 @@ def get_node_state():
     # 3. Deal with command results
     # 3.1 qstat
     job_stats = qstat_data_handler(results['qstat'])
+    running_jobs = showq_data_handler(results['showq'])
 
     # 3.2 pbsnodes
     nodes_state = pbsnodes_data_handler(results['pbsnodes'])
 
     # 4. Merge messages of pbsnodes and qstat
     #    Using the structure of pbsnodes as skeleton
-    return merge_pbs_qstat(nodes_state, job_stats)
+    return merge_pbs_qstat(nodes_state, job_stats, running_jobs)
 
 def showq_data_handler(showq_msg):
-    return 0
+    """
+    Deal with message from command 'showq'
+
+    Input:
+        showq_msg : result string from the command
+
+    Return:
+        running_jobs : A dictionary with keys Job ID, for each element
+                       record another dictionary with keys of 'Name', 'User', 'Time' 
+    """
+
+    # 1. Split message into lines
+    lines = showq_msg.splitlines()
+    # 2. grep active jobs
+    running_jobs = {}
+    for line in lines:
+        if line.startswith('    '):
+            break
+        elif len(line) > 0 and line[0].isdigit():
+            columns = line.split();
+            jobID = columns[0]
+            user = columns[1]
+            state = columns[2]
+            remain_time = columns[4]
+            running_jobs[jobID] = {'User': user,
+                                   'State': state,
+                                   'Time': remain_time,
+                                  }
+    return running_jobs
     
 def qstat_data_handler(qstat_msg):
     """
     Deal with message from command 'qstat -n'
     
-    input:
-
-    qstat_msg : result string from the command
+    Input:
+        qstat_msg : result string from the command
 
     Return:
-
-    job_state : A list of directiionaries to record job stat 
-    [{'Job_ID': ***, 'Name': ***, 'User', 'Time': **:**:**, 'Nodes': []}, ]
+        job_state : A dictionary of directiionaries to record job stat 
+        {'Job_ID': { 'Name': ***, 'User', 'Time': **:**:**, 'Nodes': []}, ... }
     """
     # 1. Split total message into lines
     lines = qstat_msg.splitlines()[4:]
@@ -221,11 +207,7 @@ def qstat_data_handler(qstat_msg):
         # 2.2.1 Create new job info mation as read a new job.
         
         if len(parts) == 11:
-            # 2.2.1.1 Add using nodes to previous job state
-            if len(jobs_state) > 0:
-                jobs_state[job_ID]['Nodes'] = nodes
 
-            # 2.2.1.2 Create a new job state
             job_ID = parts[0].split('.')[0]
             user = parts[1]
             name = parts[3]
@@ -239,22 +221,12 @@ def qstat_data_handler(qstat_msg):
                                   'Stat': stat,
                                  }
         
-        # 2.2.2 Grep Using nodes in the job
-        elif len(parts) == 1:
-            threads = line.split('+')
-            for thread in threads:
-                if thread.endswith('/0'):
-                    nodes.append(thread[-10:-2])
-
-        # 2.2.3 Crash while receive unexpected message from command
+        # 2.2.2 Crash while receive unexpected message from command
         else:
             print("Warning: Unexpected messages occurred in 'qstat -n' message.")
             print("Please check the system")
             exit(1)
     
-    if len(jobs_state) > 0:
-        jobs_state[job_ID]['Nodes'] = nodes
-
     return jobs_state
 
 def pbsnodes_data_handler(pbs_msg):
@@ -304,7 +276,7 @@ def pbsnodes_data_handler(pbs_msg):
 
     return nodes
 
-def merge_pbs_qstat(pbs, qstat):
+def merge_pbs_qstat(pbs, qstat, showq):
     """
     Merge the messages from commane "pbsnodes" and "qstat"
 
@@ -325,26 +297,27 @@ def merge_pbs_qstat(pbs, qstat):
 
     for node in pbs:
         for job in pbs[node]['Jobs']:
-            if job not in qstat:
-                continue
-            pbs[node]['Jobs'][job]['Name'] = qstat[job]['Name']
-            pbs[node]['Jobs'][job]['User'] = qstat[job]['User']
-            pbs[node]['Jobs'][job]['Time'] = qstat[job]['Time']
+            if job in qstat :
+                pbs[node]['Jobs'][job]['Name'] = qstat[job]['Name']
+            else:
+                pbs[node]['Jobs'][job]['Name'] = u'--'
+            pbs[node]['Jobs'][job]['User'] = showq[job]['User']
+            pbs[node]['Jobs'][job]['Time'] = showq[job]['Time']
     
     return pbs
 
 def get_alive_nodes(node_state):
     """
-
+    Grep alive nodes
     """
-    alive_nodes = []
+    alive_nodes = ['eureka00']
     for node in node_state:
         if node_state[node]['State'] in ['job-exclusive', 'free']:
             alive_nodes.append(node)
 
     return alive_nodes
 
-def get_cpu_info(alive_node):
+def get_cpu_usage(alive_node):
     """
     Get CPU usage, temprature
 
@@ -355,10 +328,23 @@ def get_cpu_info(alive_node):
         cpu_usage : A dictionary with key of node names, save a dictionary with info of 'Usage' and 'Temp'
     """
 
-    cmds = {
-            'usage' : ['/usr/bin/mpstat', '1', '1'],
-            'temp' : ['/usr/bin/sensors'],
-           }
+    cmd = ['/usr/bin/mpstat', '1', '2']
+    
+    cmd_msg = {}
+    cpu_usage = {}
+    rc.run_pdsh_cli(cmd, alive_nodes, cmd_msg)
+
+    lines = cmd_msg['mpstat'].splitlines()
+    for line in lines:
+        data = line.split()
+        if len(data) > 2 and data[1] == u'Average:':
+            cpu_usage[data[0][:-1]] = float(data[3])
+
+    return cpu_usage
+
+def get_cpu_temp(alive_node):
+    cmd = ['/usr/bin/sensors']
+
     return 0
 
 def get_memory_usage(alive_node):
@@ -401,14 +387,15 @@ if __name__ == "__main__":
 
     # 2. Get node state : alive_or_dead user job_name job_ID Time
     node_state = get_node_state()
-    print(node_state)
     alive_nodes = get_alive_nodes(node_state)
-    print(alive_nodes)
 
     # 3. Get node datas
     
     # 3.1 CPU : Usage and Temp.
-    cpu_usage = get_cpu_info(alive_nodes)
+    cpu_usage = get_cpu_usage(alive_nodes)
+    for node in cpu_usage:
+        print(node, cpu_usage[node])
+    cpu_temp = get_cpu_temp(alive_nodes)
     
     # 3.2 Memory usage
     mem_usage = get_memory_usage(alive_nodes)
