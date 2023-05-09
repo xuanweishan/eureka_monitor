@@ -112,11 +112,44 @@ Can use only digit and full name.""",
     return args
 
 def run_cli(cmd, results):
+    """
+    Run the command line and catch the return message.
+
+    Input:
+        cmd : A list that record command going to run.
+        results : A dictionary with key of command name and the result message.
+    """
+
+    # 1. Execute command with subprocess.
     try:
         result = subprocess.check_output(cmd)
         results[os.path.basename(cmd[0])] = result.decode('utf-8').strip()
+    # 2. Print out the error message and exit the program.
     except subprocess.CalledProcessError as err:
         print("Error: error occurred while running %s." %(cmd))
+        print("    Error code: ", err.returncode)
+        print("    Fail message:")
+        print(err.output.decode('utf-8'))
+        exit(1)
+
+def run_pdsh_cli(cmd, nodes, results):
+    """
+    Run the command line with pdsh and catch the return message.
+
+    Input:
+        cmd : A list that record command going to run.
+        nodes: A list that record nodes we are going to run command on.
+        results : A dictionary with key of command name and the result message.
+    """
+    # 1. Join the pdsh command and commands.
+    pdsh_cmd = ['pdsh', '-w', '-u', '10', ','.join(nodes)] + cmd
+    # 2. Execute command with subprocess.
+    try:
+        result = subprocess.check_output(pdsh_cmd)
+        results[os.path.basename(cmd[0])] = result.decode('utf-8').strip()
+    # 3. Print out the error message and exit the program.
+    except subprocess.CalledProcessError as err:
+        print("Error: error occurred while running %s." %(pdsh_cmd))
         print("    Error code: ", err.returncode)
         print("    Fail message:")
         print(err.output.decode('utf-8'))
@@ -132,8 +165,9 @@ def get_node_state():
     """
     # 1. Command lines to get the node stat data
     qstat = ['/usr/local/torque/bin/qstat', '-n']
+    showq = ['/usr/local/maui/bin/showq']
     pbsnodes = ['/usr/local/torque/bin/pbsnodes', '-a']
-    cmds = [qstat, pbsnodes]
+    cmds = [qstat, pbsnodes, showq]
     
     # 2. Run cmds in multiple threads
     threads = []
@@ -157,6 +191,8 @@ def get_node_state():
     #    Using the structure of pbsnodes as skeleton
     return merge_pbs_qstat(nodes_state, job_stats)
 
+def showq_data_handler(showq_msg):
+    return 0
     
 def qstat_data_handler(qstat_msg):
     """
@@ -298,6 +334,9 @@ def merge_pbs_qstat(pbs, qstat):
     return pbs
 
 def get_alive_nodes(node_state):
+    """
+
+    """
     alive_nodes = []
     for node in node_state:
         if node_state[node]['State'] in ['job-exclusive', 'free']:
@@ -317,7 +356,7 @@ def get_cpu_info(alive_node):
     """
 
     cmds = {
-            'usage' : ['/usr/bin/mpstat'],
+            'usage' : ['/usr/bin/mpstat', '1', '1'],
             'temp' : ['/usr/bin/sensors'],
            }
     return 0
