@@ -123,7 +123,7 @@ def get_node_state():
     alive_nodes : list of alive nodes
     """
     # 1. Command lines to get the node stat data
-    qstat = ['/usr/local/torque/bin/qstat', '-n']
+    qstat = ['/usr/local/torque/bin/qstat']
     showq = ['/usr/local/maui/bin/showq']
     pbsnodes = ['/usr/local/torque/bin/pbsnodes', '-a']
     cmds = [qstat, pbsnodes, showq]
@@ -184,7 +184,7 @@ def showq_data_handler(showq_msg):
     
 def qstat_data_handler(qstat_msg):
     """
-    Deal with message from command 'qstat -n'
+    Deal with message from command 'qstat'
     
     Input:
         qstat_msg : result string from the command
@@ -194,7 +194,7 @@ def qstat_data_handler(qstat_msg):
         {'Job_ID': { 'Name': ***, 'User', 'Time': **:**:**, 'Nodes': []}, ... }
     """
     # 1. Split total message into lines
-    lines = qstat_msg.splitlines()[4:]
+    lines = qstat_msg.splitlines()[2:]
     
     # 2. Deal with message per line
     # 2.1 Initialization of variables required
@@ -206,24 +206,22 @@ def qstat_data_handler(qstat_msg):
         parts = line.split()
         # 2.2.1 Create new job info mation as read a new job.
         
-        if len(parts) == 11:
+        if len(parts) == 6:
 
             job_ID = parts[0].split('.')[0]
-            user = parts[1]
-            name = parts[3]
-            stat = parts[9]
-            time = parts[10]
-            nodes = []
+            name = parts[1]
+            user = parts[2]
+            time = parts[3]
+            stat = parts[4]
             jobs_state[job_ID] = {
                                   'User': user,
                                   'Name': name,
                                   'Time': time,
                                   'Stat': stat,
                                  }
-        
         # 2.2.2 Crash while receive unexpected message from command
         else:
-            print("Warning: Unexpected messages occurred in 'qstat -n' message.")
+            print("Warning: Unexpected messages occurred in 'qstat' message.")
             print("Please check the system")
             exit(1)
     
@@ -332,6 +330,7 @@ def get_cpu_usage(alive_node):
     
     cmd_msg = {}
     cpu_usage = {}
+    
     rc.run_pdsh_cli(cmd, alive_nodes, cmd_msg)
 
     lines = cmd_msg['mpstat'].splitlines()
@@ -340,78 +339,281 @@ def get_cpu_usage(alive_node):
         if len(data) > 2 and data[1] == u'Average:':
             cpu_usage[data[0][:-1]] = float(data[3])
 
+    #results['cpu_usage'] = cpu_usage
     return cpu_usage
 
 def get_cpu_temp(alive_node):
     cmd = ['/usr/bin/sensors']
 
-    return 0
+    cmd_msg = {}
+    cpu_temp = {}
+
+    rc.run_pdsh_cli(cmd, alive_nodes, cmd_msg)
+
+    lines = cmd_msg['sensors'].splitlines()
+    for line in lines:
+        data = line.split()
+        if len(data)>1 and data[1] == 'temp1:':
+            node_name = data[0][:-1]
+            if node_name not in cpu_temp:
+                cpu_temp[node_name] = float(data[2][1:-2]) / 2
+            else:
+                cpu_temp[node_name] += float(data[2][1:-2]) / 2
+
+
+    for node in cpu_temp:
+        cpu_temp[node] -= 27
+
+    #results['cpu_temp'] = cpu_temp
+    return cpu_temp
 
 def get_memory_usage(alive_node):
     """
     """
     
     cmd = ['/usr/bin/free']
-    return 0
+
+    cmd_msg = {}
+    mem_usage = {}
+
+    rc.run_pdsh_cli(cmd, alive_node, cmd_msg)
+
+    lines = cmd_msg['free'].splitlines()
+    for line in lines:
+        data = line.split()
+        if data[1] == 'Mem:':
+            mem_usage[data[0][:-1]] = float(data[3]) / float(data[2]) * 100
+    
+    #results['Mem_usage'] = mem_usage
+    return mem_usage
 
 def get_gpu_usage(alive_node):
     """
     """
 
     cmd = ['/usr/bin/nvidia-smi', '-q']
-    return 0
+
+    cmd_msg = {}
+    gpu_usage = {}
+
+    rc.run_pdsh_cli(cmd, alive_node, cmd_msg)
+
+    lines = cmd_msg['nvidia-smi'].splitlines()
+    for line in lines:
+        data = line.split()
+        node_name = data[0][:-1]
+        if node_name not in gpu_usage:
+            gpu_usage[node_name] = {}
+
+        if 'Gpu' in line:
+            gpu_usage[node_name]['Usage'] = float(data[-2])
+        elif 'GPU Current Temp' in line:
+            gpu_usage[node_name]['Temp'] = float(data[-2])
+        elif 'Memory' in line and '%' in line:
+            gpu_usage[node_name]['Mem'] = float(data[-2])
+            
+    #results['GPU_usage'] = gpu_usage
+    return gpu_usage
 
 def get_IB_speed(alive_node):
     """
     """
-
     cmd = ['/usr/sbin/iblinkinfo', '-l']
-    return 0
+    if os.path.basename(os.path.expanduser('~')) != 'root':
+        print("Info: Normal user cannot run the command %s %s" %(cmd[0], cmd[1]))
+        return 0
+
+    cmd_msg = {}
+    IB_speed = {}
+
+    rc.run_cli(cmd, cmd_msg)
+
+    lines = cmd_msg['iblinkinfo'].splitlines()
+    for line in lines:
+        data = line.split()
+        if data[2].startswith('eureka'):
+            IB_speed[data[2]] = int(data[8][0]) * float(data[9])
+
+    #results['IB_speed'] = IB_speed
+    return IB_speed
+
+def get_IB_adaptor_temp(alive_node):
+    """
+    """
+    cmd = ['mget_temp', '-d', '/dev/mst/*']
+    if os.path.basename(os.path.expanduser('~')) != 'root':
+        print("Info: Normal user cannot run the command %s" % cmd[0])
+        return 0
+    
+    cmd_msg = {}
+    IB_temp = {}
+
+    rc.run_pdsh_cli(cmd, alive_node, cmd_msg)
+
+    lines = cmd_msg['mget_temp'].splitlines()
+    for line in lines:
+        data = line.split()
+        IB_temp[data[0][:-1]] = data[1]
+
+    #results['IB_temp'] = IB_temp
+    return IB_temp
 
 def get_disk_usage(alive_node):
     """
     """
 
     cmd = ['/usr/bin/df']
+
+    cmd_msg = {}
+    df_usage = {}
+
+    rc.run_pdsh_cli(cmd, alive_node, cmd_msg)
+
+    lines = cmd_msg['df'].splitlines()
+    for line in lines:
+        data = line.split()
+        node_name = data[0][:-1]
+        if data[-1] == '/':
+            df_usage[node_name] = data[-2]
+    
+    #results['disk_usage'] = df_usage
+    return df_usage
+
+def merge_data(state, cpu, cpu_temp, mem, gpu, ib_speed, ib_temp, disk):
+    
+    for node in state:
+        if 'down' in state[node]['State'] and node != 'eureka00': continue
+        #cpu
+        state[node]['CPU_usage'] = cpu[node]
+        state[node]['CPU_temp']  = cpu_temp[node]
+        #mem
+        state[node]['Mem_usage'] = mem[node]
+        #gpu
+        state[node]['GPU_usage'] = gpu[node]['Usage']
+        state[node]['GPU_mem']   = gpu[node]['Mem']
+        state[node]['GPU_temp']  = gpu[node]['Temp']
+        #ib_speed
+        if not ib_speed == 0:
+            state[node]['IB_speed']  = ib_speed[node]
+        #ib_temp
+        if not ib_temp == 0:
+            state[node]['IB_temp']   = ib_temp[node]
+        #disk
+        state[node]['Disk_usage']= disk[node]
+
+    return state
+
+def output(data, mode):
+    """
+    """
+    
+    if mode == 'p':
+        print_output(data)
+            
+
+    elif mode == 's':
+        print('a')
+    else:
+        print("Error no such mode")
+    
     return 0
 
-def merge_data(state, cpu, mem, gpu, ib, disk):
-    return 0
+def print_output(data):
+    # First line define name for each column
+    print("%-12s %-16s %-16s %-8s %8s %8s %8s %8s %8s %8s %8s %8s %8s"
+         %('Node_name', 
+           'User', 'Job_name', 'Job_ID',
+           '%CPU', 'CPU_Mem',  'T_CPU',
+           '%GPU', 'GPU_Mem',  'T_GPU',
+           'IB_speed', 'T_IB',     'Disk',
+         ))
 
-def output(data):
-    return 0
+    for node in sorted(data):
+        count = 0
+        if 'IB_speed' in data[node]:
+            IB_speed = "%.3f" % data[node]['IB_speed']
+        else:
+            IB_speed = '--'
+
+        if 'IB_temp' in data[node]:
+            IB_temp = data[node]['IB_temp']
+        else:
+            IB_temp = '--'
+        
+        if 'down' in data[node]['State'] and node != 'eureka00':
+            print("%-12s %-16s" %(node, 'Down'))
+            continue
+
+        elif len(data[node]['Jobs']) == 0:
+            print("%-12s %-16s %-16s %-8s %8.1f %8.2f %8.1f %8.1f %8.2f %8.1f %8s %8s %8s"
+                 %(node, 
+                   '--','--', '--',
+                   data[node]['CPU_usage'], data[node]['Mem_usage'], data[node]['CPU_temp'],
+                   data[node]['GPU_usage'], data[node]['GPU_mem'], data[node]['GPU_temp'],
+                   IB_speed, IB_temp, data[node]['Disk_usage'],
+                 ))
+            continue
+
+        for jobID in data[node]['Jobs']:
+            if count == 0:
+                print("%-12s %-16s %-16s %-8s %8.1f %8.2f %8.1f %8.1f %8.2f %8.1f %8s %8s %8s"
+                     %(node, 
+                       data[node]['Jobs'][jobID]['User'], data[node]['Jobs'][jobID]['Name'], jobID,
+                       data[node]['CPU_usage'], data[node]['Mem_usage'], data[node]['CPU_temp'],
+                       data[node]['GPU_usage'], data[node]['GPU_mem'], data[node]['GPU_temp'],
+                       IB_speed, IB_temp, data[node]['Disk_usage'],
+                     ))
+                count += 1
+            else:
+                print("%-12s %-16s %-16s %-8s %8s %8s %8s %8s %8s %8s %8s %8s %8s"
+                     %('',
+                       data[node]['Jobs'][jobID]['User'], data[node]['Jobs'][jobID]['Name'], jobID , data[node]['Jobs'][jobID]['Time'],
+                       '','','','','','','','','',
+                     ))
+
 
 if __name__ == "__main__":
     # 1. Handle arguments
     args = arg_handler()
+    if args.output == None:
+        mode = 'p'
+    else:
+        mode = 's'
 
     # 2. Get node state : alive_or_dead user job_name job_ID Time
     node_state = get_node_state()
     alive_nodes = get_alive_nodes(node_state)
 
     # 3. Get node datas
-    
+    Threads = []
+    results = {}
     # 3.1 CPU : Usage and Temp.
+    
     cpu_usage = get_cpu_usage(alive_nodes)
-    for node in cpu_usage:
-        print(node, cpu_usage[node])
     cpu_temp = get_cpu_temp(alive_nodes)
     
     # 3.2 Memory usage
-    mem_usage = get_memory_usage(alive_nodes)
+    Mem_usage = get_memory_usage(alive_nodes)
 
     # 3.3 GPU : Usage Mem_Usage Temp.
-    gpu_usage = get_gpu_usage(alive_nodes)
+    GPU_usage = get_gpu_usage(alive_nodes)
 
     # 3.4 IB : Status Speed
     IB_speed = get_IB_speed(alive_nodes)
 
-    # 3.5 Disk : Usage
+    # 3.5 IB : IB adaptor Temp.
+    IB_temp = get_IB_adaptor_temp(alive_nodes)
+
+    # 3.6 Disk : Usage
     disk_usage = get_disk_usage(alive_nodes)
 
     # 4. Merge data as a table
-    output_data = merge_data(node_state, cpu_usage, mem_usage, gpu_usage, IB_speed, disk_usage)
+    output_data = merge_data(node_state, 
+                             cpu_usage, cpu_temp, Mem_usage,
+                             GPU_usage, IB_speed, IB_temp,
+                             disk_usage,
+                            )
 
     # 5. Output
-    output(output_data)
+    output(output_data, mode)
     
