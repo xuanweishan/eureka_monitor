@@ -3,7 +3,6 @@ Usage:
     monitor.py [arguments]
 
 Arguments:
-    -o [output_file],  --output [output_file]   Specify output file path and name.
     -n [node_names],   --nodes  [node_name]     Specify nodes you want to check, saperated by ",".
     
     -h                 Print this help message.
@@ -77,22 +76,15 @@ node_name  user  job_name job_ID Time %CPU CPU_Mem T_CPU %GPU GPU_Mem T_GPU v_IB
 
     # 2.2 Add arguments into parser
 
-    parser.add_argument('-o', '--output',
-                        help = "Specify output file.",
-                        type = str,
-                        default = None,
-                        required = False,
-                       )
-
-    parser.add_argument( '-n', '--nodes',
-                         help = """
-Specify nodes you want to check, saperated by ' '.
-Can use only digit and full name.""",
-                         type = str,
-                         nargs = '+',
-                         required = False,
-                         default = None,
-                       )
+#    parser.add_argument( '-n', '--nodes',
+#                        help = """
+#Specify nodes you want to check, saperated by ' '.
+#Can use only digit and full name.""",
+#                         type = str,
+#                         nargs = '+',
+#                         required = False,
+#                         default = None,
+#                       )
 
     # 3. Handle the input arguments
 
@@ -105,7 +97,8 @@ Can use only digit and full name.""",
         print("Warning: unexpected argument occurred.\n")
         parser.print_help()
         exit(1)
-    
+
+    return args
     # 4.2 If no specified nodes, then do it on all nodes.
     if args.nodes is None:
         args.nodes = ['eureka%02i' %(n) for n in range(0,34)]
@@ -339,7 +332,6 @@ def get_cpu_usage(alive_node):
         if len(data) > 2 and data[1] == u'Average:':
             cpu_usage[data[0][:-1]] = float(data[3])
 
-    #results['cpu_usage'] = cpu_usage
     return cpu_usage
 
 def get_cpu_temp(alive_node):
@@ -364,7 +356,6 @@ def get_cpu_temp(alive_node):
     for node in cpu_temp:
         cpu_temp[node] -= 27
 
-    #results['cpu_temp'] = cpu_temp
     return cpu_temp
 
 def get_memory_usage(alive_node):
@@ -384,7 +375,6 @@ def get_memory_usage(alive_node):
         if data[1] == 'Mem:':
             mem_usage[data[0][:-1]] = float(data[3]) / float(data[2]) * 100
     
-    #results['Mem_usage'] = mem_usage
     return mem_usage
 
 def get_gpu_usage(alive_node):
@@ -412,7 +402,6 @@ def get_gpu_usage(alive_node):
         elif 'Memory' in line and '%' in line:
             gpu_usage[node_name]['Mem'] = float(data[-2])
             
-    #results['GPU_usage'] = gpu_usage
     return gpu_usage
 
 def get_IB_speed(alive_node):
@@ -434,7 +423,6 @@ def get_IB_speed(alive_node):
         if data[2].startswith('eureka'):
             IB_speed[data[2]] = int(data[8][0]) * float(data[9])
 
-    #results['IB_speed'] = IB_speed
     return IB_speed
 
 def get_IB_adaptor_temp(alive_node):
@@ -455,7 +443,6 @@ def get_IB_adaptor_temp(alive_node):
         data = line.split()
         IB_temp[data[0][:-1]] = data[1]
 
-    #results['IB_temp'] = IB_temp
     return IB_temp
 
 def get_disk_usage(alive_node):
@@ -502,23 +489,8 @@ def merge_data(state, cpu, cpu_temp, mem, gpu, ib_speed, ib_temp, disk):
         state[node]['Disk_usage']= disk[node]
 
     return state
-
-def output(data, mode):
-    """
-    """
     
-    if mode == 'p':
-        print_output(data)
-            
-
-    elif mode == 's':
-        print('a')
-    else:
-        print("Error no such mode")
-    
-    return 0
-
-def print_output(data):
+def output(data):
     # First line define name for each column
     print("%-12s %-16s %-16s %-8s %8s %8s %8s %8s %8s %8s %8s %8s %8s"
          %('Node_name', 
@@ -571,22 +543,21 @@ def print_output(data):
                        '','','','','','','','','',
                      ))
 
+def write_file(data):
+    for node in data:
+        count == 0
+
 
 if __name__ == "__main__":
     # 1. Handle arguments
     args = arg_handler()
-    if args.output == None:
-        mode = 'p'
-    else:
-        mode = 's'
 
     # 2. Get node state : alive_or_dead user job_name job_ID Time
     node_state = get_node_state()
     alive_nodes = get_alive_nodes(node_state)
-
+    
     # 3. Get node datas
-    Threads = []
-    results = {}
+    
     # 3.1 CPU : Usage and Temp.
     
     cpu_usage = get_cpu_usage(alive_nodes)
@@ -615,5 +586,5 @@ if __name__ == "__main__":
                             )
 
     # 5. Output
-    output(output_data, mode)
+    output(output_data)
     
