@@ -288,12 +288,13 @@ def merge_pbs_qstat(pbs, qstat, showq):
 
     for node in pbs:
         for job in pbs[node]['Jobs']:
-            if job in qstat :
+            if job in qstat:
                 pbs[node]['Jobs'][job]['Name'] = qstat[job]['Name']
+                pbs[node]['Jobs'][job]['Time'] = qstat[job]['Time']
             else:
                 pbs[node]['Jobs'][job]['Name'] = u'--'
+                pbs[node]['Jobs'][job]['Time'] = u'--'
             pbs[node]['Jobs'][job]['User'] = showq[job]['User']
-            pbs[node]['Jobs'][job]['Time'] = showq[job]['Time']
     
     return pbs
 
@@ -492,12 +493,12 @@ def merge_data(state, cpu, cpu_temp, mem, gpu, ib_speed, ib_temp, disk):
     
 def output(data):
     # First line define name for each column
-    print("%-12s %-16s %-16s %-8s %8s %8s %8s %8s %8s %8s %8s %8s %8s"
+    print("%-12s %-16s %-16s %-8s %-10s %4s %8s %8s %8s %8s %8s %8s %6s %6s"
          %('Node_name', 
-           'User', 'Job_name', 'Job_ID',
+           'User', 'Job_name', 'Job_ID', 'Time_used',
            '%CPU', 'CPU_Mem',  'T_CPU',
            '%GPU', 'GPU_Mem',  'T_GPU',
-           'IB_speed', 'T_IB',     'Disk',
+           'IB_speed', 'T_IB', 'Disk',
          ))
 
     for node in sorted(data):
@@ -517,9 +518,9 @@ def output(data):
             continue
 
         elif len(data[node]['Jobs']) == 0:
-            print("%-12s %-16s %-16s %-8s %8.1f %8.2f %8.1f %8.1f %8.2f %8.1f %8s %8s %8s"
+            print("%-12s %-16s %-16s %-8s %-10s %4.1f %8.2f %8.1f %8.1f %8.2f %8.1f %8s %6s %6s"
                  %(node, 
-                   '--','--', '--',
+                   '--','--', '--','--',
                    data[node]['CPU_usage'], data[node]['Mem_usage'], data[node]['CPU_temp'],
                    data[node]['GPU_usage'], data[node]['GPU_mem'], data[node]['GPU_temp'],
                    IB_speed, IB_temp, data[node]['Disk_usage'],
@@ -528,16 +529,16 @@ def output(data):
 
         for jobID in data[node]['Jobs']:
             if count == 0:
-                print("%-12s %-16s %-16s %-8s %8.1f %8.2f %8.1f %8.1f %8.2f %8.1f %8s %8s %8s"
+                print("%-12s %-16s %-16s %-8s %-10s %4.1f %8.2f %8.1f %8.1f %8.2f %8.1f %8s %6s %6s"
                      %(node, 
-                       data[node]['Jobs'][jobID]['User'], data[node]['Jobs'][jobID]['Name'], jobID,
+                       data[node]['Jobs'][jobID]['User'], data[node]['Jobs'][jobID]['Name'], jobID, data[node]['Jobs'][jobID]['Time'],
                        data[node]['CPU_usage'], data[node]['Mem_usage'], data[node]['CPU_temp'],
                        data[node]['GPU_usage'], data[node]['GPU_mem'], data[node]['GPU_temp'],
                        IB_speed, IB_temp, data[node]['Disk_usage'],
                      ))
                 count += 1
             else:
-                print("%-12s %-16s %-16s %-8s %8s %8s %8s %8s %8s %8s %8s %8s %8s"
+                print("%-12s %-16s %-16s %-8s %-10s %4s %8s %8s %8s %8s %8s %8s %6s %6s"
                      %('',
                        data[node]['Jobs'][jobID]['User'], data[node]['Jobs'][jobID]['Name'], jobID , data[node]['Jobs'][jobID]['Time'],
                        '','','','','','','','','',
