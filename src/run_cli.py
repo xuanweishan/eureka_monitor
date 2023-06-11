@@ -36,7 +36,7 @@ def run_pdsh_cli(cmd, nodes, results):
         results : A dictionary with key of command name and the result message.
     """
     # 1. Join the pdsh command and commands.
-    pdsh_cmd = ['pdsh', '-u', '10', '-w', ','.join(nodes)] + cmd
+    pdsh_cmd = ['pdsh', '-R', 'ssh', '-u', '10', '-w', ','.join(nodes)] + cmd
     # 2. Execute command with subprocess.
     try:
         result = subprocess.check_output(pdsh_cmd)
