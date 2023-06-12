@@ -348,10 +348,7 @@ def get_cpu_temp(alive_node):
         data = line.split()
         if len(data)>1 and data[1] == 'CPU':
             node_name = data[0][:-1]
-            if node_name not in cpu_temp:
-                cpu_temp[node_name] = float(data[4]) / 2
-            else:
-                cpu_temp[node_name] += float(data[4]) / 2
+            cpu_temp[node_name] = float(data[4])
 
     return cpu_temp
 
