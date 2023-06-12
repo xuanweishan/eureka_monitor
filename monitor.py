@@ -37,11 +37,11 @@ def validate_nodes(nodes, parser):
     vali_nodes = []
 
     for node in nodes:
-        if node.startswith('eureka') and int(node[6:]) < 34:
+        if node.startswith('spock') and int(node[6:]) < 34:
             vali_nodes.append(node)
             
         elif node.isdigit() and int(node) < 34:
-            vali_nodes.append('eureka%02i' %int(node))
+            vali_nodes.append('spock%02i' %int(node))
 
         else:
             print("Warning: Invalid node names\n")
@@ -101,7 +101,7 @@ node_name  user  job_name job_ID Time %CPU CPU_Mem T_CPU %GPU GPU_Mem T_GPU v_IB
     return args
     # 4.2 If no specified nodes, then do it on all nodes.
     if args.nodes is None:
-        args.nodes = ['eureka%02i' %(n) for n in range(0,34)]
+        args.nodes = ['spock%02i' %(n) for n in range(0,34)]
     else:
         args.nodes = validate_nodes(args.nodes, parser)
 
@@ -232,7 +232,7 @@ def pbsnodes_data_handler(pbs_msg):
                 for each node is also a dictionary store keys of 'state', 'jobs'
                 'jobs' is also a dictionary with keys of job IDs, store the threads on that node.
         nodes = {
-                'eurekaXX': {'state': 'xx', 'jobs': {'ID1': xxxx, 'ID2': xxxx}},
+                'spockXX': {'state': 'xx', 'jobs': {'ID1': xxxx, 'ID2': xxxx}},
                 }
     """
     
@@ -243,7 +243,7 @@ def pbsnodes_data_handler(pbs_msg):
     for line in pbs_msg.splitlines():
         
         # 2.1 Get node name and initial node state dict
-        if line.startswith('eureka'):
+        if line.startswith('spock'):
             node_name = line
             nodes[node_name] = {'State': 'unknown', 'Jobs': {}}
         
@@ -302,7 +302,7 @@ def get_alive_nodes(node_state):
     """
     Grep alive nodes
     """
-    alive_nodes = ['eureka00']
+    alive_nodes = ['spock00']
     for node in node_state:
         if node_state[node]['State'] in ['job-exclusive', 'free']:
             alive_nodes.append(node)
@@ -336,26 +336,22 @@ def get_cpu_usage(alive_node):
     return cpu_usage
 
 def get_cpu_temp(alive_node):
-    cmd = ['/usr/bin/sensors']
+    cmd = ['/usr/bin/ipmitool', 'sensor']
 
     cmd_msg = {}
     cpu_temp = {}
 
     rc.run_pdsh_cli(cmd, alive_nodes, cmd_msg)
 
-    lines = cmd_msg['sensors'].splitlines()
+    lines = cmd_msg['ipmitool'].splitlines()
     for line in lines:
         data = line.split()
-        if len(data)>1 and data[1] == 'temp1:':
+        if len(data)>1 and data[1] == 'CPU':
             node_name = data[0][:-1]
             if node_name not in cpu_temp:
-                cpu_temp[node_name] = float(data[2][1:-2]) / 2
+                cpu_temp[node_name] = float(data[4]) / 2
             else:
-                cpu_temp[node_name] += float(data[2][1:-2]) / 2
-
-
-    for node in cpu_temp:
-        cpu_temp[node] -= 27
+                cpu_temp[node_name] += float(data[4]) / 2
 
     return cpu_temp
 
@@ -421,7 +417,7 @@ def get_IB_speed(alive_node):
     lines = cmd_msg['iblinkinfo'].splitlines()
     for line in lines:
         data = line.split()
-        if data[2].startswith('eureka'):
+        if data[2].startswith('spock'):
             IB_speed[data[2]] = int(data[8][0]) * float(data[9])
 
     return IB_speed
@@ -429,7 +425,7 @@ def get_IB_speed(alive_node):
 def get_IB_adaptor_temp(alive_node):
     """
     """
-    cmd = ['mget_temp', '-d', '/dev/mst/*']
+    cmd = ['/usr/bin/mget_temp', '-d', '/dev/mst/*']
     if os.path.basename(os.path.expanduser('~')) != 'root':
         print("Info: Normal user cannot run the command %s" % cmd[0])
         return 0
@@ -470,7 +466,7 @@ def get_disk_usage(alive_node):
 def merge_data(state, cpu, cpu_temp, mem, gpu, ib_speed, ib_temp, disk):
     
     for node in state:
-        if 'down' in state[node]['State'] and node != 'eureka00': continue
+        if 'down' in state[node]['State'] and node != 'spock00': continue
         #cpu
         state[node]['CPU_usage'] = cpu[node]
         state[node]['CPU_temp']  = cpu_temp[node]
@@ -513,7 +509,7 @@ def output(data):
         else:
             IB_temp = '--'
         
-        if 'down' in data[node]['State'] and node != 'eureka00':
+        if 'down' in data[node]['State'] and node != 'spock00':
             print("%-12s %-16s" %(node, 'Down'))
             continue
 
